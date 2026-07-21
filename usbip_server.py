@@ -187,6 +187,7 @@ class USBIPServer:
                 self._server_socket.settimeout(1.0)
                 try:
                     client_socket, client_address = self._server_socket.accept()
+                    self._configure_client_socket(client_socket)
                     logger.info(f"Connection from {client_address}")
                     client_thread = threading.Thread(
                         target=self._handle_client,
@@ -199,6 +200,23 @@ class USBIPServer:
                     continue
             except OSError:
                 break
+
+    @staticmethod
+    def _configure_client_socket(client_socket: socket.socket) -> None:
+        """Disable Nagle's algorithm on an accepted client connection.
+
+        USB/IP is a latency-sensitive request/response protocol made up of many
+        small PDUs. With Nagle enabled, small URB responses are held back waiting
+        for an ACK; combined with the peer's delayed-ACK timer this adds tens to
+        hundreds of milliseconds per URB. That is enough to break timing-critical
+        sequences such as the DTR/RTS auto-reset serial bootloaders rely on (the
+        device then never enters download mode). The Linux usbip userspace sets
+        TCP_NODELAY for the same reason.
+        """
+        try:
+            client_socket.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        except OSError:
+            logger.debug("Could not enable TCP_NODELAY on client socket")
 
     def stop(self) -> None:
         """Stop the USB/IP server."""

@@ -199,3 +199,27 @@ def test_exactly_once_completion_under_unlink_race() -> None:
         )
         assert submit_count.get(orig, 0) <= 1, f"duplicate RET_SUBMIT for seqnum {orig}"
         assert sp is not None or up is not None, f"seqnum {orig} got no terminal response"
+
+
+def test_client_socket_has_nagle_disabled() -> None:
+    """Accepted client sockets must have TCP_NODELAY set.
+
+    USB/IP is a small-PDU request/response protocol; Nagle plus the peer's
+    delayed-ACK timer adds tens to hundreds of ms per URB, which breaks the
+    DTR/RTS auto-reset timing serial bootloaders depend on.
+    """
+    import socket as _socket
+
+    listener = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+    listener.bind(("127.0.0.1", 0))
+    listener.listen(1)
+    client = _socket.create_connection(listener.getsockname())
+    accepted, _ = listener.accept()
+    try:
+        assert accepted.getsockopt(_socket.IPPROTO_TCP, _socket.TCP_NODELAY) == 0
+        srv.USBIPServer._configure_client_socket(accepted)
+        assert accepted.getsockopt(_socket.IPPROTO_TCP, _socket.TCP_NODELAY) != 0
+    finally:
+        accepted.close()
+        client.close()
+        listener.close()
